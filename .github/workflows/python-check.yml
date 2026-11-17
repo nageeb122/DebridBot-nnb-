@@ -8,6 +8,7 @@ on:
       - feature/admin-dashboard-access
       - feature/sqlite-user-management
       - feature/interactive-admin-panel
+      - feature/usage-analytics
   pull_request:
     branches:
       - main
