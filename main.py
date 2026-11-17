@@ -21,6 +21,7 @@ from pyrogram.types import (
 
 from config import load_config
 import user_store
+import service_health
 from ui_ar import about_text, help_text as arabic_help_text, main_menu, menu_back, welcome_text
 from controlc import get_paste_links
 from debrid import (
@@ -931,6 +932,7 @@ def admin_services_keyboard() -> InlineKeyboardMarkup:
         f"🔁 Failover: {'مفعّل' if failover else 'معطّل'}",
         callback_data="adm:failover",
     )])
+    rows.append([InlineKeyboardButton("🩺 فحص صحة جميع الخدمات", callback_data="adm:health")])
     rows.append([InlineKeyboardButton("⬅️ لوحة المشرف", callback_data="adm:home")])
     return InlineKeyboardMarkup(rows)
 
@@ -946,7 +948,8 @@ def admin_services_text() -> str:
         f"🔁 التحويل التلقائي عند الفشل: "
         f"{'مفعّل' if user_store.get_failover_enabled(cfg.failover) else 'معطّل'}\n\n"
         "اختر الخدمة لتفعيلها أو تعطيلها. ويمكنك اختبار اتصال API أو تحديد الخدمة الافتراضية.\n"
-        "مفاتيح API لا تُعرض ولا تُحفظ في قاعدة البيانات؛ تُقرأ من متغيرات بيئة الخادم."
+        "مفاتيح API لا تُعرض ولا تُحفظ في قاعدة البيانات؛ تُقرأ من متغيرات بيئة الخادم.\n"
+        "فحص الصحة يدوي وقراءة فقط؛ لا يعرض الرصيد أو تاريخ الانتهاء دون API موثقة."
     )
 
 
@@ -2155,6 +2158,30 @@ async def on_callback(client: Client, query: CallbackQuery):
                 reply_markup=admin_services_keyboard(),
             )
             return
+        if section == "health":
+            await query.answer("جارٍ فحص الخدمات المفعّلة…")
+            results = await service_health.check_providers(
+                {slug: providers[slug] for slug in enabled_provider_slugs()},
+                timeout=15,
+            )
+            lines = ["🩺 **تقرير صحة خدمات Debrid**", ""]
+            for result in results:
+                user_store.save_service_health(result.provider, result.status, result.detail)
+                provider = providers.get(result.provider)
+                label = provider.name if provider else result.provider
+                icon = {"ok": "✅", "timeout": "⏱️", "error": "❌"}.get(result.status, "❔")
+                summary = {
+                    "ok": "استجابة API سليمة والمصادقة مقبولة",
+                    "timeout": "انتهت مهلة الاتصال",
+                    "error": f"تعذّر التحقق ({result.detail})",
+                }.get(result.status, result.status)
+                lines.append(f"{icon} **{label}:** {summary}")
+            lines.extend(["", "هذا فحص اتصال/مصادقة فقط، وليس فحصاً للرصيد أو صلاحية الاشتراك."])
+            await safe_edit(
+                query.message, "\n".join(lines) + "\n\n" + admin_services_text(),
+                reply_markup=admin_services_keyboard(),
+            )
+            return
         if section == "svc_test":
             slug = argument
             provider = providers.get(slug)
@@ -2162,14 +2189,13 @@ async def on_callback(client: Client, query: CallbackQuery):
                 await query.answer("الخدمة غير مفعّلة أو غير مهيأة.", show_alert=True)
                 return
             await query.answer("جارٍ اختبار اتصال API…")
-            try:
-                torrents = await asyncio.wait_for(provider.list_torrents(), timeout=15)
-                result_text = f"✅ اتصال {provider.name} ناجح. استجابة API سليمة؛ التورنتات: {len(torrents)}."
-            except asyncio.TimeoutError:
-                result_text = f"⏱ انتهت مهلة اختبار {provider.name} (15 ثانية)."
-            except Exception as exc:
-                log.warning("Service test failed for %s: %s", slug, type(exc).__name__)
-                result_text = f"❌ تعذّر التحقق من {provider.name}. نوع الخطأ: {type(exc).__name__}."
+            result = await service_health.check_provider(provider, timeout=15)
+            user_store.save_service_health(slug, result.status, result.detail)
+            result_text = (
+                f"✅ اتصال {provider.name} ناجح؛ المصادقة مقبولة. {result.detail}."
+                if result.status == "ok"
+                else f"❌ فشل فحص {provider.name}: {result.detail}."
+            )
             await safe_edit(
                 query.message, result_text + "\n\n" + admin_services_text(),
                 reply_markup=admin_services_keyboard(),

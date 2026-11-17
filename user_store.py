@@ -56,6 +56,16 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS service_health (
+                provider TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                detail TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -323,3 +333,35 @@ def get_user_counts() -> dict[str, int]:
             "SELECT COUNT(*) FROM access WHERE status='blocked'"
         ).fetchone()[0]
         return {"total": total, "approved": approved, "blocked": blocked}
+
+
+def save_service_health(provider: str, status: str, detail: str = "") -> None:
+    """Persist a short, credential-free service health result."""
+    if status not in {"ok", "timeout", "error"}:
+        raise ValueError("invalid service health status")
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """
+            INSERT INTO service_health(provider, status, checked_at, detail)
+            VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+            ON CONFLICT(provider) DO UPDATE SET
+                status=excluded.status,
+                checked_at=CURRENT_TIMESTAMP,
+                detail=excluded.detail
+            """,
+            (provider[:80], status, detail[:120]),
+        )
+
+
+def get_service_health(provider: str | None = None) -> list[dict[str, Any]]:
+    with closing(_connect()) as conn:
+        if provider:
+            rows = conn.execute(
+                "SELECT provider, status, checked_at, detail FROM service_health WHERE provider=?",
+                (provider,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT provider, status, checked_at, detail FROM service_health ORDER BY provider"
+            ).fetchall()
+        return [dict(row) for row in rows]

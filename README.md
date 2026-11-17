@@ -113,3 +113,20 @@ debrid/
 ## Credits
 
 Original base by [Oihalitz](https://github.com/Oihalitz/DebridBot) (formerly RealDebridTelegram), uploader by [StarMade✨](https://github.com/StarMadeThis) inspired by [Anasty17](https://github.com/anasty17).
+
+
+## Service health monitoring
+
+The admin service panel provides a **manual, read-only health check** for enabled
+providers. It calls each provider's existing `list_torrents()` API method with
+a 15-second timeout and stores only the provider slug, result category, check
+time, and a short credential-free detail in SQLite. A successful response
+confirms API reachability and that the configured credentials were accepted
+for that request; a generic error is not automatically labelled an
+authentication failure.
+
+The current provider adapters do not expose a verified, common account-status
+contract for remaining balance/traffic or subscription expiry. Those fields
+are therefore shown as **not available**, never guessed. No background polling
+is enabled; checks run only when an administrator presses the health-check
+button. The check does not create, delete, or modify torrents or account data.
