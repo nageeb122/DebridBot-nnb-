@@ -52,6 +52,27 @@ class UserStoreTests(unittest.TestCase):
         self.assertEqual(detail["username"], "sample_user")
         self.assertEqual(len(user_store.list_users(limit=1, offset=1)), 0)
 
+    def test_analytics_tracks_resolves_downloads_and_providers(self):
+        user_store.record_activity(303, "sample_user", "Sample")
+        user_store.record_event(303, "resolve_success", provider="TorBox", filename="file.zip")
+        user_store.record_event(303, "resolve_failed", success=False)
+        user_store.record_event(303, "download_success", provider="TorBox",
+                                filename="file.zip", size_bytes=2048)
+        report = user_store.get_analytics(30)
+        self.assertEqual(report["totals"]["resolved"], 1)
+        self.assertEqual(report["totals"]["failed"], 1)
+        self.assertEqual(report["totals"]["downloads"], 1)
+        self.assertEqual(report["totals"]["bytes_transferred"], 2048)
+        self.assertEqual(report["providers"][0]["provider"], "TorBox")
+        self.assertEqual(report["active_users"][0]["user_id"], 303)
+        self.assertEqual(report["recent"][0]["event_type"], "download_success")
+
+    def test_analytics_does_not_store_url_fields(self):
+        user_store.record_event(505, "resolve_success", provider="Direct",
+                                filename="archive.zip")
+        report = user_store.get_analytics()
+        self.assertNotIn("url", report["recent"][0])
+
     def test_unblock_clears_override(self):
         user_store.set_user_status(404, "blocked")
         user_store.clear_user_status(404)
