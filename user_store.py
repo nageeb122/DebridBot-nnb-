@@ -42,6 +42,20 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                event_type TEXT NOT NULL,
+                provider TEXT,
+                filename TEXT,
+                size_bytes INTEGER,
+                success INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -159,6 +173,79 @@ def get_user(user_id: int) -> dict[str, Any] | None:
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+def record_event(
+    user_id: int | None,
+    event_type: str,
+    provider: str | None = None,
+    filename: str | None = None,
+    size_bytes: int | None = None,
+    success: bool = True,
+) -> None:
+    """Store operational events without source URLs or credentials."""
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """
+            INSERT INTO usage_events(
+                user_id, event_type, provider, filename, size_bytes, success
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, event_type[:40], (provider or "")[:80],
+             (filename or "")[:255], max(0, size_bytes or 0), int(success)),
+        )
+
+
+def get_analytics(days: int = 30) -> dict[str, Any]:
+    days = max(1, min(days, 365))
+    with closing(_connect()) as conn, conn:
+        totals = conn.execute(
+            """
+            SELECT COUNT(*) AS events,
+                SUM(CASE WHEN event_type='resolve_success' THEN 1 ELSE 0 END) AS resolved,
+                SUM(CASE WHEN event_type='resolve_failed' THEN 1 ELSE 0 END) AS failed,
+                SUM(CASE WHEN event_type='download_success' THEN 1 ELSE 0 END) AS downloads,
+                SUM(CASE WHEN event_type='download_failed' THEN 1 ELSE 0 END) AS download_failures,
+                SUM(CASE WHEN event_type='drip_upload_success' THEN 1 ELSE 0 END) AS drip_uploads,
+                COUNT(DISTINCT user_id) AS active_users,
+                COALESCE(SUM(CASE WHEN event_type IN ('download_success','drip_upload_success')
+                                  THEN size_bytes ELSE 0 END), 0) AS bytes_transferred
+            FROM usage_events WHERE created_at >= datetime('now', ?)
+            """,
+            (f"-{days} days",),
+        ).fetchone()
+        providers = conn.execute(
+            """
+            SELECT provider, COUNT(*) AS uses FROM usage_events
+            WHERE event_type='resolve_success' AND provider IS NOT NULL
+              AND provider != '' AND created_at >= datetime('now', ?)
+            GROUP BY provider ORDER BY uses DESC LIMIT 8
+            """,
+            (f"-{days} days",),
+        ).fetchall()
+        active = conn.execute(
+            """
+            SELECT e.user_id, COALESCE(u.first_name, '') AS first_name,
+                   COALESCE(u.username, '') AS username, COUNT(*) AS operations
+            FROM usage_events e LEFT JOIN users u ON u.user_id=e.user_id
+            WHERE e.user_id IS NOT NULL AND e.created_at >= datetime('now', ?)
+            GROUP BY e.user_id ORDER BY operations DESC LIMIT 8
+            """,
+            (f"-{days} days",),
+        ).fetchall()
+        recent = conn.execute(
+            """
+            SELECT event_type, provider, filename, size_bytes, success, created_at
+            FROM usage_events ORDER BY id DESC LIMIT 10
+            """
+        ).fetchall()
+        return {
+            "totals": dict(totals),
+            "providers": [dict(row) for row in providers],
+            "active_users": [dict(row) for row in active],
+            "recent": [dict(row) for row in recent],
+            "days": days,
+        }
 
 
 def get_user_counts() -> dict[str, int]:
