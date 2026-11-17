@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import closing
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
