@@ -73,6 +73,18 @@ class UserStoreTests(unittest.TestCase):
         report = user_store.get_analytics()
         self.assertNotIn("url", report["recent"][0])
 
+    def test_service_enable_disable_and_default_provider_settings(self):
+        self.assertTrue(user_store.get_service_enabled("torbox"))
+        user_store.set_service_enabled("torbox", False)
+        self.assertFalse(user_store.get_service_enabled("torbox"))
+        user_store.set_default_provider("alldebrid")
+        self.assertEqual(user_store.get_default_provider(), "alldebrid")
+
+    def test_failover_setting_can_be_changed_and_persisted(self):
+        self.assertTrue(user_store.get_failover_enabled(True))
+        user_store.set_failover_enabled(False)
+        self.assertFalse(user_store.get_failover_enabled(True))
+
     def test_unblock_clears_override(self):
         user_store.set_user_status(404, "blocked")
         user_store.clear_user_status(404)
