@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/arabic-telegram-menu
+      - feature/admin-dashboard-access
   pull_request:
     branches:
       - main

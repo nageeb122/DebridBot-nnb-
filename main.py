@@ -56,6 +56,7 @@ if LOG_LEVEL != "DEBUG":
 log = logging.getLogger("bot")
 
 cfg = load_config()
+BOT_STARTED_AT = time.time()
 
 app = Client(
     "debrid_bot",
@@ -173,7 +174,7 @@ class DirectDownloadError(Exception):
 
 def _auth(_, __, update) -> bool:
     user = update.from_user
-    return bool(user) and (not cfg.allowed_users or user.id in cfg.allowed_users)
+    return bool(user) and (user.id in cfg.admin_users or not cfg.allowed_users or user.id in cfg.allowed_users)
 
 
 auth = filters.create(_auth)
@@ -835,6 +836,41 @@ async def cmd_menu(_, message: Message):
 @app.on_message(filters.command("help") & filters.private & auth)
 async def cmd_help(_, message: Message):
     await message.reply_text(arabic_help_text(), reply_markup=menu_back())
+
+
+@app.on_message(filters.command("id") & filters.private)
+async def cmd_id(_, message: Message):
+    """يعرض معرف تيليجرام الخاص بالمستخدم لتسهيل إعداد الصلاحيات."""
+    if not message.from_user:
+        return
+    await message.reply_text(f"🆔 معرف حسابك: `{message.from_user.id}`")
+
+
+@app.on_message(filters.command("admin") & filters.private)
+async def cmd_admin(_, message: Message):
+    """لوحة معلومات المشرف؛ لا تعرضها إلا لمعرفات ADMIN_USER_IDS."""
+    user = message.from_user
+    if not user or user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص لمشرفي البوت.")
+        return
+
+    uptime = max(0, int(time.time() - BOT_STARTED_AT))
+    hours, remainder = divmod(uptime, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    pending_count = len(pending) + len(pending_ytdlp) + len(pending_ad_streams) + len(pending_pickers)
+    allowed_text = "مفتوح للجميع" if not cfg.allowed_users else str(len(cfg.allowed_users))
+    await message.reply_text(
+        "🛡️ لوحة المشرف\n\n"
+        f"👤 المشرفون: {len(cfg.admin_users)}\n"
+        f"🔐 المستخدمون المسموحون: {allowed_text}\n"
+        f"⚙️ خدمات Debrid المهيأة: {len(providers)}\n"
+        f"👥 مستخدمون اختاروا خدمة: {len(user_service)}\n"
+        f"📦 عمليات معلّقة: {pending_count}\n"
+        f"🔄 مهام خلفية نشطة: {len(background_tasks)}\n"
+        f"⏱️ مدة التشغيل: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n"
+        "لإضافة مشرف أو تغيير قائمة السماح، عدّل ADMIN_USER_IDS أو ALLOWED_USER_IDS في ملف البيئة ثم أعد تشغيل البوت.\n"
+        "لا تضع مفاتيح API أو رمز البوت داخل ملفات GitHub."
+    )
 
 
 @app.on_message(filters.command("service") & filters.private & auth)
@@ -1767,7 +1803,7 @@ async def send_torrent_file_card(
 
 @app.on_callback_query()
 async def on_callback(client: Client, query: CallbackQuery):
-    if cfg.allowed_users and query.from_user.id not in cfg.allowed_users:
+    if query.from_user.id not in cfg.admin_users and cfg.allowed_users and query.from_user.id not in cfg.allowed_users:
         await query.answer("No autorizado.", show_alert=True)
         return
 
@@ -2667,6 +2703,8 @@ async def main():
             BotCommand("wget", "تنزيل رابط مباشرة وإرساله هنا"),
             BotCommand("torrents", "إدارة التورنت"),
             BotCommand("help", "المساعدة وطريقة الاستخدام"),
+            BotCommand("id", "عرض معرف حسابك في تيليجرام"),
+            BotCommand("admin", "لوحة المشرف (للمصرح لهم فقط)"),
         ]
     )
     me = await app.get_me()
