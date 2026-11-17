@@ -227,13 +227,31 @@ def safe_filename(name: str) -> str:
     return name or f"archivo_{uuid.uuid4().hex[:8]}"
 
 
+def enabled_provider_slugs() -> list[str]:
+    return [
+        slug for slug in providers
+        if user_store.get_service_enabled(slug, True)
+    ]
+
+
 def active_slug(user_id: int) -> str:
-    slug = user_service.get(user_id)
-    return slug if slug in providers else next(iter(providers))
+    enabled = enabled_provider_slugs()
+    if not enabled:
+        return ""
+    selected = user_service.get(user_id)
+    if selected in enabled:
+        return selected
+    default = user_store.get_default_provider()
+    if default in enabled:
+        return default
+    return enabled[0]
 
 
 def provider_for(user_id: int) -> DebridProvider:
-    return providers[active_slug(user_id)]
+    slug = active_slug(user_id)
+    if not slug:
+        raise DebridError("لا توجد خدمة Debrid مفعّلة حالياً.")
+    return providers[slug]
 
 
 def remember(link: UnrestrictedLink, provider: DebridProvider | str) -> str:
@@ -612,16 +630,21 @@ def providers_for_url(user_id: int, url: str) -> list[DebridProvider]:
     """Orden de servicios a probar: regla de host > servicio activo > resto (failover)."""
     hostname = (urlparse(url).hostname or "").lower()
     ordered: list[DebridProvider] = []
+    enabled = set(enabled_provider_slugs())
     for rule_host, slug in cfg.host_rules:
-        if rule_host in hostname and slug in providers:
+        if rule_host in hostname and slug in enabled:
             ordered.append(providers[slug])
             break
-    active = provider_for(user_id)
-    if active not in ordered:
+    active_slug_value = active_slug(user_id)
+    active = providers.get(active_slug_value)
+    if active and active not in ordered:
         ordered.append(active)
-    if not cfg.failover:
+    if not user_store.get_failover_enabled(cfg.failover):
         return ordered[:1]
-    return ordered + [p for p in providers.values() if p not in ordered]
+    return ordered + [
+        provider for slug, provider in providers.items()
+        if slug in enabled and provider not in ordered
+    ]
 
 
 async def unrestrict_url(
@@ -784,11 +807,11 @@ def service_keyboard(user_id: int) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
-                ("✅ " if slug == active else "") + provider.name,
+                ("✅ " if slug == active else "") + providers[slug].name,
                 callback_data=f"svc:{slug}",
             )
         ]
-        for slug, provider in providers.items()
+        for slug in enabled_provider_slugs()
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -875,12 +898,56 @@ def admin_dashboard_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm:users:0")],
         [InlineKeyboardButton("📊 الإحصائيات وسجل العمليات", callback_data="adm:analytics")],
+        [InlineKeyboardButton("⚙️ إدارة خدمات Debrid", callback_data="adm:services")],
         [
             InlineKeyboardButton("🔒 وضع مقيّد", callback_data="adm:mode:restricted"),
             InlineKeyboardButton("🌐 وضع مفتوح", callback_data="adm:mode:open"),
         ],
         [InlineKeyboardButton("🔄 تحديث اللوحة", callback_data="adm:home")],
     ])
+
+
+def admin_services_keyboard() -> InlineKeyboardMarkup:
+    enabled = enabled_provider_slugs()
+    default = user_store.get_default_provider()
+    rows = []
+    for slug, provider in providers.items():
+        active = user_store.get_service_enabled(slug, True)
+        marker = "🟢" if active else "⚪"
+        rows.append([InlineKeyboardButton(
+            f"{marker} {provider.name}",
+            callback_data=f"adm:svc_toggle:{slug}",
+        )])
+        if active:
+            rows.append([
+                InlineKeyboardButton(
+                    ("⭐ الافتراضي" if slug == default else "اجعله الافتراضي"),
+                    callback_data=f"adm:svc_default:{slug}",
+                ),
+                InlineKeyboardButton("🧪 اختبار الاتصال", callback_data=f"adm:svc_test:{slug}"),
+            ])
+    failover = user_store.get_failover_enabled(cfg.failover)
+    rows.append([InlineKeyboardButton(
+        f"🔁 Failover: {'مفعّل' if failover else 'معطّل'}",
+        callback_data="adm:failover",
+    )])
+    rows.append([InlineKeyboardButton("⬅️ لوحة المشرف", callback_data="adm:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def admin_services_text() -> str:
+    enabled = enabled_provider_slugs()
+    default = user_store.get_default_provider()
+    default_name = providers[default].name if default in providers and default in enabled else "تلقائي"
+    return (
+        "⚙️ **إدارة خدمات Debrid**\\n\\n"
+        f"🟢 الخدمات المفعّلة: {len(enabled)} من {len(providers)}\\n"
+        f"⭐ الخدمة الافتراضية: {default_name}\\n"
+        f"🔁 التحويل التلقائي عند الفشل: "
+        f"{'مفعّل' if user_store.get_failover_enabled(cfg.failover) else 'معطّل'}\\n\\n"
+        "اختر الخدمة لتفعيلها أو تعطيلها. ويمكنك اختبار اتصال API أو تحديد الخدمة الافتراضية.\\n"
+        "مفاتيح API لا تُعرض ولا تُحفظ في قاعدة البيانات؛ تُقرأ من متغيرات بيئة الخادم."
+    )
 
 
 def admin_users_keyboard(offset: int = 0) -> InlineKeyboardMarkup:
@@ -1108,11 +1175,11 @@ async def cmd_admin(_, message: Message):
 
 @app.on_message(filters.command("service") & filters.private & auth)
 async def cmd_service(_, message: Message):
-    if not providers:
-        await message.reply_text("❌ No hay servicios debrid configurados.")
+    if not enabled_provider_slugs():
+        await message.reply_text("❌ لا توجد خدمات Debrid مفعّلة حالياً. تواصل مع المشرف.")
         return
     await message.reply_text(
-        "⚙️ Elige el servicio debrid activo:",
+        "⚙️ اختر خدمة Debrid المفعّلة:",
         reply_markup=service_keyboard(message.from_user.id),
     )
 
@@ -2047,6 +2114,76 @@ async def on_callback(client: Client, query: CallbackQuery):
             await query.answer("هذه اللوحة مخصصة للمشرفين فقط.", show_alert=True)
             return
         section, _, argument = value.partition(":")
+        if section == "services":
+            await query.answer()
+            await safe_edit(
+                query.message, admin_services_text(),
+                reply_markup=admin_services_keyboard(),
+            )
+            return
+        if section == "svc_toggle":
+            slug = argument
+            if slug not in providers:
+                await query.answer("هذه الخدمة غير مهيأة في الخادم.", show_alert=True)
+                return
+            enabled = user_store.get_service_enabled(slug, True)
+            if enabled and len(enabled_provider_slugs()) <= 1:
+                await query.answer("يجب إبقاء خدمة واحدة مفعّلة على الأقل.", show_alert=True)
+                return
+            user_store.set_service_enabled(slug, not enabled)
+            if enabled and user_store.get_default_provider() == slug:
+                fallback = next(
+                    (item for item in enabled_provider_slugs() if item != slug), None
+                )
+                if fallback:
+                    user_store.set_default_provider(fallback)
+            await query.answer("تم تحديث حالة الخدمة.")
+            await safe_edit(
+                query.message, admin_services_text(),
+                reply_markup=admin_services_keyboard(),
+            )
+            return
+        if section == "svc_default":
+            slug = argument
+            if slug not in enabled_provider_slugs():
+                await query.answer("فعّل الخدمة أولاً لتعيينها افتراضياً.", show_alert=True)
+                return
+            user_store.set_default_provider(slug)
+            await query.answer("تم تعيين الخدمة الافتراضية.")
+            await safe_edit(
+                query.message, admin_services_text(),
+                reply_markup=admin_services_keyboard(),
+            )
+            return
+        if section == "svc_test":
+            slug = argument
+            provider = providers.get(slug)
+            if not provider or slug not in enabled_provider_slugs():
+                await query.answer("الخدمة غير مفعّلة أو غير مهيأة.", show_alert=True)
+                return
+            await query.answer("جارٍ اختبار اتصال API…")
+            try:
+                torrents = await asyncio.wait_for(provider.list_torrents(), timeout=15)
+                result_text = f"✅ اتصال {provider.name} ناجح. استجابة API سليمة؛ التورنتات: {len(torrents)}."
+            except asyncio.TimeoutError:
+                result_text = f"⏱ انتهت مهلة اختبار {provider.name} (15 ثانية)."
+            except Exception as exc:
+                log.warning("Service test failed for %s: %s", slug, type(exc).__name__)
+                result_text = f"❌ تعذّر التحقق من {provider.name}. نوع الخطأ: {type(exc).__name__}."
+            await safe_edit(
+                query.message, result_text + "\\n\\n" + admin_services_text(),
+                reply_markup=admin_services_keyboard(),
+            )
+            return
+        if section == "failover":
+            enabled = user_store.get_failover_enabled(cfg.failover)
+            user_store.set_failover_enabled(not enabled)
+            await query.answer("تم تحديث إعداد التحويل التلقائي.")
+            await safe_edit(
+                query.message, admin_services_text(),
+                reply_markup=admin_services_keyboard(),
+            )
+            return
         if section == "analytics":
             try:
                 days = max(1, min(365, int(argument or 30)))
@@ -2230,8 +2367,8 @@ async def on_callback(client: Client, query: CallbackQuery):
         return
 
     if action == "svc":
-        if value not in providers:
-            await query.answer("Servicio no disponible.", show_alert=True)
+        if value not in enabled_provider_slugs():
+            await query.answer("الخدمة غير متاحة حالياً.", show_alert=True)
             return
         user_service[query.from_user.id] = value
         await query.answer(f"Servicio activo: {providers[value].name}")
