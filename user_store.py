@@ -175,6 +175,68 @@ def get_user(user_id: int) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
+def get_service_enabled(slug: str, default: bool = True) -> bool:
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key=?",
+            (f"service_enabled:{slug}",),
+        ).fetchone()
+        if not row:
+            return default
+        return row["value"] == "1"
+
+
+def set_service_enabled(slug: str, enabled: bool) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """
+            INSERT INTO settings(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (f"service_enabled:{slug}", "1" if enabled else "0"),
+        )
+
+
+def get_default_provider(default: str | None = None) -> str | None:
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='default_provider'"
+        ).fetchone()
+        return row["value"] if row else default
+
+
+def set_default_provider(slug: str) -> None:
+    if not slug or len(slug) > 80:
+        raise ValueError("invalid provider slug")
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """
+            INSERT INTO settings(key, value) VALUES ('default_provider', ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (slug,),
+        )
+
+
+def get_failover_enabled(default: bool = True) -> bool:
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='failover_enabled'"
+        ).fetchone()
+        return (row["value"] == "1") if row else default
+
+
+def set_failover_enabled(enabled: bool) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """
+            INSERT INTO settings(key, value) VALUES ('failover_enabled', ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            ("1" if enabled else "0",),
+        )
+
+
 def record_event(
     user_id: int | None,
     event_type: str,
