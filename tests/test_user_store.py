@@ -48,6 +48,9 @@ class UserStoreTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["user_id"], 303)
         self.assertEqual(rows[0]["message_count"], 2)
+        detail = user_store.get_user(303)
+        self.assertEqual(detail["username"], "sample_user")
+        self.assertEqual(len(user_store.list_users(limit=1, offset=1)), 0)
 
     def test_unblock_clears_override(self):
         user_store.set_user_status(404, "blocked")
