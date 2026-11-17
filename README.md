@@ -38,14 +38,14 @@
 Set `ADMIN_USER_IDS` in `.env` to one or more trusted Telegram numeric IDs (comma-separated). Use `/id` in a private chat to see your own ID. Admin commands are available only to those IDs:
 
 - `/admin` — runtime and access overview.
-- `/users` — list recently active users and their status; `/admin` also opens an interactive inline-button dashboard.
+- `/users` — list recently active users and their status; `/admin` opens an interactive inline-button dashboard with user management and usage analytics.
 - `/user_add ID` — approve a user.
 - `/user_remove ID` or `/user_block ID` — block a user.
 - `/user_unblock ID` — clear a block; in restricted mode, approve separately with `/user_add ID`.
 - `/access_mode restricted` — only admins and approved users can use the bot.
 - `/access_mode open` — allow everyone except blocked users.
 
-User records, message counts, access decisions, and access mode are stored in SQLite at `USER_DB_PATH` (default: `data/users.sqlite3`). Back up this database and keep its directory persistent. In Docker, mount `/app/data` as shown above. The default access mode is restricted when `ALLOWED_USER_IDS` is configured, otherwise open; the admin can change it from Telegram.
+User records, message counts, access decisions, access mode, and operational events (successful/failed link resolution and completed transfers) are stored in SQLite at `USER_DB_PATH` (default: `data/users.sqlite3`). Back up this database and keep its directory persistent. In Docker, mount `/app/data` as shown above. The default access mode is restricted when `ALLOWED_USER_IDS` is configured, otherwise open; the admin can change it from Telegram.
 
 ## Setup
 
