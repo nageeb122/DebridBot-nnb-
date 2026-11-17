@@ -3,7 +3,6 @@ import logging
 import mimetypes
 import os
 import re
-import shlex
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -989,17 +988,22 @@ async def cmd_admin(_, message: Message):
     hours, remainder = divmod(uptime, 3600)
     minutes, seconds = divmod(remainder, 60)
     pending_count = len(pending) + len(pending_ytdlp) + len(pending_ad_streams) + len(pending_pickers)
-    allowed_text = "مفتوح للجميع" if not cfg.allowed_users else str(len(cfg.allowed_users))
+    counts = user_store.get_user_counts()
+    default_mode = "restricted" if cfg.allowed_users else "open"
+    mode = user_store.get_access_mode(default_mode)
     await message.reply_text(
         "🛡️ لوحة المشرف\n\n"
         f"👤 المشرفون: {len(cfg.admin_users)}\n"
-        f"🔐 المستخدمون المسموحون: {allowed_text}\n"
+        f"👥 المستخدمون المسجلون: {counts['total']}\n"
+        f"✅ المستخدمون المعتمدون: {counts['approved']}\n"
+        f"🚫 المستخدمون المحظورون: {counts['blocked']}\n"
+        f"🔐 وضع الوصول: {'مقيّد' if mode == 'restricted' else 'مفتوح'}\n"
         f"⚙️ خدمات Debrid المهيأة: {len(providers)}\n"
         f"👥 مستخدمون اختاروا خدمة: {len(user_service)}\n"
         f"📦 عمليات معلّقة: {pending_count}\n"
         f"🔄 مهام خلفية نشطة: {len(background_tasks)}\n"
         f"⏱️ مدة التشغيل: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n"
-        "لإضافة مشرف أو تغيير قائمة السماح، عدّل ADMIN_USER_IDS أو ALLOWED_USER_IDS في ملف البيئة ثم أعد تشغيل البوت.\n"
+        "استخدم /users لإدارة الحسابات.\n"
         "لا تضع مفاتيح API أو رمز البوت داخل ملفات GitHub."
     )
 
