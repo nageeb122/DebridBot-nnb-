@@ -38,7 +38,7 @@
 Set `ADMIN_USER_IDS` in `.env` to one or more trusted Telegram numeric IDs (comma-separated). Use `/id` in a private chat to see your own ID. Admin commands are available only to those IDs:
 
 - `/admin` — runtime and access overview.
-- `/users` — list recently active users and their status.
+- `/users` — list recently active users and their status; `/admin` also opens an interactive inline-button dashboard.
 - `/user_add ID` — approve a user.
 - `/user_remove ID` or `/user_block ID` — block a user.
 - `/user_unblock ID` — clear a block; in restricted mode, approve separately with `/user_add ID`.
