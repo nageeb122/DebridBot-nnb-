@@ -2048,36 +2048,44 @@ async def on_callback(client: Client, query: CallbackQuery):
             return
         section, _, argument = value.partition(":")
         if section == "analytics":
-            report = user_store.get_analytics(30)
+            try:
+                days = max(1, min(365, int(argument or 30)))
+            except ValueError:
+                days = 30
+            report = user_store.get_analytics(days)
             totals = report["totals"]
-            providers_text = "\\n".join(
+            providers_text = "\n".join(
                 f"• {item['provider']}: {item['uses']}" for item in report["providers"]
             ) or "لا توجد بيانات بعد."
-            users_text = "\\n".join(
+            users_text = "\n".join(
                 f"• {item['first_name'] or item['username'] or item['user_id']}: {item['operations']}"
                 for item in report["active_users"]
             ) or "لا توجد بيانات بعد."
-            recent_text = "\\n".join(
+            recent_text = "\n".join(
                 f"• {item['created_at']} · {item['event_type']} · {item['filename'] or '—'}"
                 for item in report["recent"]
             ) or "لا توجد عمليات مسجلة بعد."
             await query.answer()
             await safe_edit(
                 query.message,
-                "📊 **إحصائيات آخر 30 يوماً**\\n\\n"
-                f"🔗 فك روابط ناجح: {totals['resolved'] or 0}\\n"
-                f"❌ محاولات فاشلة: {totals['failed'] or 0}\\n"
-                f"📥 تنزيلات مكتملة إلى تيليجرام: {totals['downloads'] or 0}\\n"
-                f"❌ تنزيلات فاشلة: {totals['download_failures'] or 0}\\n"
-                f"💧 رفع مكتمل إلى DripFiles: {totals['drip_uploads'] or 0}\\n"
-                f"👥 مستخدمون نشطون: {totals['active_users'] or 0}\\n"
-                f"📦 حجم النقل المكتمل: {human_size(totals['bytes_transferred'] or 0)}\\n\\n"
-                f"⚙️ **الخدمات الأكثر استخداماً**\\n{providers_text}\\n\\n"
-                f"🏅 **الأكثر نشاطاً**\\n{users_text}\\n\\n"
-                f"🕘 **آخر العمليات**\\n{recent_text}",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("⬅️ لوحة المشرف", callback_data="adm:home")
-                ]]),
+                "📊 **إحصائيات آخر " + str(days) + " يوماً**\n\n"
+                f"🔗 فك روابط ناجح: {totals['resolved'] or 0}\n"
+                f"❌ محاولات فاشلة: {totals['failed'] or 0}\n"
+                f"📥 تنزيلات مكتملة إلى تيليجرام: {totals['downloads'] or 0}\n"
+                f"❌ تنزيلات فاشلة: {totals['download_failures'] or 0}\n"
+                f"💧 رفع مكتمل إلى DripFiles: {totals['drip_uploads'] or 0}\n"
+                f"👥 مستخدمون نشطون: {totals['active_users'] or 0}\n"
+                f"📦 حجم النقل المكتمل: {human_size(totals['bytes_transferred'] or 0)}\n\n"
+                f"⚙️ **الخدمات الأكثر استخداماً**\n{providers_text}\n\n"
+                f"🏅 **الأكثر نشاطاً**\n{users_text}\n\n"
+                f"🕘 **آخر العمليات**\n{recent_text}",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("آخر 7 أيام", callback_data="adm:analytics:7"),
+                        InlineKeyboardButton("آخر 30 يوماً", callback_data="adm:analytics:30"),
+                    ],
+                    [InlineKeyboardButton("⬅️ لوحة المشرف", callback_data="adm:home")],
+                ]),
             )
             return
         if section == "home":
