@@ -1794,13 +1794,27 @@ async def on_callback(client: Client, query: CallbackQuery):
                 ),
             )
         elif value == "torrents":
-            await query.answer("استخدم الأمر /torrents لعرض وإدارة التورنت.", show_alert=True)
+            await query.answer()
+            await query.message.reply_text(
+                "🧲 لإدارة التورنت اضغط الأمر التالي:",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("فتح إدارة التورنت", callback_data="menu:open_torrents")
+                ]]),
+            )
+        elif value == "open_torrents":
+            await query.answer()
+            await query.message.reply_text(
+                "أرسل الأمر /torrents لعرض التورنت ومتابعة التقدم والحصول على الروابط أو حذفها."
+            )
         elif value == "help":
             await safe_edit(query.message, arabic_help_text(), reply_markup=menu_back())
         elif value == "about":
             await safe_edit(query.message, about_text(), reply_markup=menu_back())
         elif value == "link":
-            await query.answer("أرسل رابط التحميل في المحادثة وسأعالجه.", show_alert=True)
+            await query.answer()
+            await query.message.reply_text(
+                "🔗 أرسل رابط التحميل هنا، وسأحاول فكّه وتجهيز خيارات التنزيل."
+            )
         else:
             await query.answer()
         return
