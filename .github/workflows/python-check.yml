@@ -10,6 +10,7 @@ on:
       - feature/interactive-admin-panel
       - feature/usage-analytics
       - feature/debrid-service-manager
+      - feature/service-health-monitoring
   pull_request:
     branches:
       - main
