@@ -847,6 +847,77 @@ async def cmd_id(_, message: Message):
     await message.reply_text(f"🆔 معرف حسابك: `{message.from_user.id}`")
 
 
+def admin_dashboard_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm:users:0")],
+        [
+            InlineKeyboardButton("🔒 وضع مقيّد", callback_data="adm:mode:restricted"),
+            InlineKeyboardButton("🌐 وضع مفتوح", callback_data="adm:mode:open"),
+        ],
+        [InlineKeyboardButton("🔄 تحديث اللوحة", callback_data="adm:home")],
+    ])
+
+
+def admin_users_keyboard(offset: int = 0) -> InlineKeyboardMarkup:
+    page_size = 8
+    records = user_store.list_users(page_size, offset)
+    rows = []
+    for item in records:
+        label = item["first_name"] or item["username"] or str(item["user_id"])
+        if len(label) > 22:
+            label = label[:19] + "…"
+        status = item["status"] or "افتراضي"
+        rows.append([InlineKeyboardButton(
+            f"{label} · {status}",
+            callback_data=f"adm:user:{item['user_id']}:{offset}",
+        )])
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"adm:users:{max(0, offset-page_size)}"))
+    if len(records) == page_size:
+        nav.append(InlineKeyboardButton("التالي ➡️", callback_data=f"adm:users:{offset+page_size}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("⬅️ لوحة المشرف", callback_data="adm:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def admin_user_keyboard(user_id: int, offset: int) -> InlineKeyboardMarkup:
+    item = user_store.get_user(user_id)
+    status = item["status"] if item else None
+    rows = []
+    if user_id not in cfg.admin_users:
+        if status == "blocked":
+            rows.append([InlineKeyboardButton("♻️ إزالة الحظر", callback_data=f"adm:unblock:{user_id}:{offset}")])
+        else:
+            rows.append([InlineKeyboardButton("🚫 حظر المستخدم", callback_data=f"adm:block:{user_id}:{offset}")])
+        if status == "approved":
+            rows.append([InlineKeyboardButton("↩️ إلغاء الاعتماد", callback_data=f"adm:revoke:{user_id}:{offset}")])
+        else:
+            rows.append([InlineKeyboardButton("✅ اعتماد المستخدم", callback_data=f"adm:approve:{user_id}:{offset}")])
+    rows.append([InlineKeyboardButton("⬅️ قائمة المستخدمين", callback_data=f"adm:users:{offset}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def admin_user_text(user_id: int) -> str:
+    item = user_store.get_user(user_id)
+    if not item:
+        return f"لم يتم العثور على سجل للمستخدم {user_id}."
+    name = item["first_name"] or "بدون اسم"
+    username = f"@{item['username']}" if item["username"] else "غير متوفر"
+    status = item["status"] or "افتراضي حسب إعدادات الوصول"
+    return (
+        "👤 **تفاصيل المستخدم**\n\n"
+        f"الاسم: {name}\n"
+        f"المعرف: `{item['user_id']}`\n"
+        f"اسم المستخدم: {username}\n"
+        f"الحالة: {status}\n"
+        f"عدد الرسائل: {item['message_count']}\n"
+        f"أول ظهور: {item['first_seen']}\n"
+        f"آخر ظهور: {item['last_seen']}"
+    )
+
+
 @app.on_message(filters.command("users") & filters.private)
 async def cmd_users(_, message: Message):
     user = message.from_user
@@ -1004,7 +1075,9 @@ async def cmd_admin(_, message: Message):
         f"🔄 مهام خلفية نشطة: {len(background_tasks)}\n"
         f"⏱️ مدة التشغيل: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n"
         "استخدم /users لإدارة الحسابات.\n"
-        "لا تضع مفاتيح API أو رمز البوت داخل ملفات GitHub."
+        "استخدم الأزرار أدناه لإدارة المستخدمين ووضع الوصول.\n"
+        "لا تضع مفاتيح API أو رمز البوت داخل ملفات GitHub.",
+        reply_markup=admin_dashboard_keyboard(),
     )
 
 
@@ -1943,6 +2016,98 @@ async def on_callback(client: Client, query: CallbackQuery):
         return
 
     action, _, value = query.data.partition(":")
+
+    if action == "adm":
+        if query.from_user.id not in cfg.admin_users:
+            await query.answer("هذه اللوحة مخصصة للمشرفين فقط.", show_alert=True)
+            return
+        section, _, argument = value.partition(":")
+        if section == "home":
+            counts = user_store.get_user_counts()
+            mode = user_store.get_access_mode("restricted" if cfg.allowed_users else "open")
+            await query.answer()
+            await safe_edit(
+                query.message,
+                "🛡️ **لوحة إدارة البوت**\n\n"
+                f"👥 المستخدمون المسجلون: {counts['total']}\n"
+                f"✅ المعتمدون: {counts['approved']}\n"
+                f"🚫 المحظورون: {counts['blocked']}\n"
+                f"🔐 وضع الوصول: {'مقيّد' if mode == 'restricted' else 'مفتوح'}\n"
+                f"⚙️ خدمات Debrid: {len(providers)}\n"
+                f"📦 العمليات المعلّقة: {len(pending) + len(pending_ytdlp) + len(pending_ad_streams) + len(pending_pickers)}",
+                reply_markup=admin_dashboard_keyboard(),
+            )
+            return
+        if section == "users":
+            try:
+                offset = max(0, int(argument or 0))
+            except ValueError:
+                offset = 0
+            await query.answer()
+            await safe_edit(
+                query.message,
+                "👥 **المستخدمون المسجلون**\nاختر مستخدماً لعرض تفاصيله وتعديل صلاحياته:",
+                reply_markup=admin_users_keyboard(offset),
+            )
+            return
+        if section == "user":
+            parts = argument.split(":")
+            try:
+                target_id = int(parts[0])
+                offset = max(0, int(parts[1])) if len(parts) > 1 else 0
+            except ValueError:
+                await query.answer("معرف المستخدم غير صالح.", show_alert=True)
+                return
+            await query.answer()
+            await safe_edit(query.message, admin_user_text(target_id),
+                            reply_markup=admin_user_keyboard(target_id, offset))
+            return
+        if section in {"block", "unblock", "approve", "revoke"}:
+            parts = argument.split(":")
+            try:
+                target_id = int(parts[0])
+                offset = max(0, int(parts[1])) if len(parts) > 1 else 0
+            except ValueError:
+                await query.answer("معرف المستخدم غير صالح.", show_alert=True)
+                return
+            if target_id in cfg.admin_users:
+                await query.answer("لا يمكن تعديل صلاحيات مشرف من هذه اللوحة.", show_alert=True)
+                return
+            if section == "block":
+                user_store.set_user_status(target_id, "blocked")
+                notice = "تم حظر المستخدم."
+            elif section == "unblock":
+                user_store.clear_user_status(target_id)
+                notice = "تمت إزالة الحظر."
+            elif section == "approve":
+                user_store.set_user_status(target_id, "approved")
+                notice = "تم اعتماد المستخدم."
+            else:
+                user_store.clear_user_status(target_id)
+                notice = "تم إلغاء الاعتماد وإرجاع الحالة للوضع الافتراضي."
+            await query.answer(notice)
+            await safe_edit(query.message, admin_user_text(target_id),
+                            reply_markup=admin_user_keyboard(target_id, offset))
+            return
+        if section == "mode":
+            if argument not in {"open", "restricted"}:
+                await query.answer("وضع الوصول غير صالح.", show_alert=True)
+                return
+            user_store.set_access_mode(argument)
+            await query.answer("تم تحديث وضع الوصول.")
+            counts = user_store.get_user_counts()
+            await safe_edit(
+                query.message,
+                "🛡️ **لوحة إدارة البوت**\n\n"
+                f"👥 المستخدمون المسجلون: {counts['total']}\n"
+                f"✅ المعتمدون: {counts['approved']}\n"
+                f"🚫 المحظورون: {counts['blocked']}\n"
+                f"🔐 وضع الوصول: {'مقيّد' if argument == 'restricted' else 'مفتوح'}",
+                reply_markup=admin_dashboard_keyboard(),
+            )
+            return
+        await query.answer("طلب غير معروف.", show_alert=True)
+        return
 
     if action == "noop":  # indicador de página, no hace nada
         await query.answer()

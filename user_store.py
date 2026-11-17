@@ -130,7 +130,7 @@ def clear_user_status(user_id: int) -> None:
         conn.execute("DELETE FROM access WHERE user_id=?", (user_id,))
 
 
-def list_users(limit: int = 30) -> list[dict[str, Any]]:
+def list_users(limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -139,11 +139,26 @@ def list_users(limit: int = 30) -> list[dict[str, Any]]:
             FROM users u
             LEFT JOIN access a ON a.user_id=u.user_id
             ORDER BY u.last_seen DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (max(1, min(limit, 100)),),
+            (max(1, min(limit, 100)), max(0, offset)),
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def get_user(user_id: int) -> dict[str, Any] | None:
+    with closing(_connect()) as conn, conn:
+        row = conn.execute(
+            """
+            SELECT u.user_id, u.username, u.first_name, u.first_seen,
+                   u.last_seen, u.message_count, a.status, a.updated_at
+            FROM users u
+            LEFT JOIN access a ON a.user_id=u.user_id
+            WHERE u.user_id=?
+            """,
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def get_user_counts() -> dict[str, int]:
