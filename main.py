@@ -20,6 +20,7 @@ from pyrogram.types import (
 )
 
 from config import load_config
+from ui_ar import about_text, help_text as arabic_help_text, main_menu, menu_back, welcome_text
 from controlc import get_paste_links
 from debrid import (
     AdStreamProbe,
@@ -819,9 +820,21 @@ def build_help_text() -> str:
     return "\n".join(lines)
 
 
-@app.on_message(filters.command(["start", "help"]) & filters.private & auth)
+@app.on_message(filters.command("start") & filters.private & auth)
 async def cmd_start(_, message: Message):
-    await message.reply_text(build_help_text())
+    username = message.from_user.first_name if message.from_user else None
+    await message.reply_text(welcome_text(username), reply_markup=main_menu())
+
+
+@app.on_message(filters.command("menu") & filters.private & auth)
+async def cmd_menu(_, message: Message):
+    username = message.from_user.first_name if message.from_user else None
+    await message.reply_text(welcome_text(username), reply_markup=main_menu())
+
+
+@app.on_message(filters.command("help") & filters.private & auth)
+async def cmd_help(_, message: Message):
+    await message.reply_text(arabic_help_text(), reply_markup=menu_back())
 
 
 @app.on_message(filters.command("service") & filters.private & auth)
@@ -1764,6 +1777,48 @@ async def on_callback(client: Client, query: CallbackQuery):
         await query.answer()
         return
 
+    if action == "menu":
+        if value == "home":
+            username = query.from_user.first_name if query.from_user else None
+            await safe_edit(query.message, welcome_text(username), reply_markup=main_menu())
+        elif value == "services":
+            if not providers:
+                await query.answer("لم يتم إعداد أي خدمة Debrid بعد.", show_alert=True)
+                return
+            await safe_edit(
+                query.message,
+                "⚙️ **اختر خدمة Debrid النشطة:**",
+                reply_markup=InlineKeyboardMarkup(
+                    service_keyboard(query.from_user.id).inline_keyboard
+                    + [[InlineKeyboardButton("⬅️ القائمة الرئيسية", callback_data="menu:home")]]
+                ),
+            )
+        elif value == "torrents":
+            await query.answer()
+            await query.message.reply_text(
+                "🧲 لإدارة التورنت اضغط الأمر التالي:",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("فتح إدارة التورنت", callback_data="menu:open_torrents")
+                ]]),
+            )
+        elif value == "open_torrents":
+            await query.answer()
+            await query.message.reply_text(
+                "أرسل الأمر /torrents لعرض التورنت ومتابعة التقدم والحصول على الروابط أو حذفها."
+            )
+        elif value == "help":
+            await safe_edit(query.message, arabic_help_text(), reply_markup=menu_back())
+        elif value == "about":
+            await safe_edit(query.message, about_text(), reply_markup=menu_back())
+        elif value == "link":
+            await query.answer()
+            await query.message.reply_text(
+                "🔗 أرسل رابط التحميل هنا، وسأحاول فكّه وتجهيز خيارات التنزيل."
+            )
+        else:
+            await query.answer()
+        return
+
     if action == "tf":
         await handle_torrent_picker(query, value)
         return
@@ -2606,10 +2661,12 @@ async def main():
     # menú de comandos de Telegram (autocompletado al escribir "/")
     await app.set_bot_commands(
         [
-            BotCommand("service", "Elegir el servicio debrid activo"),
-            BotCommand("wget", "Descargar una URL tal cual y subirla aquí"),
-            BotCommand("torrents", "Gestionar tus torrents"),
-            BotCommand("help", "Ayuda y ejemplos de uso"),
+            BotCommand("start", "القائمة الرئيسية"),
+            BotCommand("menu", "عرض القائمة الرئيسية"),
+            BotCommand("service", "اختيار خدمة Debrid"),
+            BotCommand("wget", "تنزيل رابط مباشرة وإرساله هنا"),
+            BotCommand("torrents", "إدارة التورنت"),
+            BotCommand("help", "المساعدة وطريقة الاستخدام"),
         ]
     )
     me = await app.get_me()
