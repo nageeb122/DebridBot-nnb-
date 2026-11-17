@@ -940,12 +940,12 @@ def admin_services_text() -> str:
     default = user_store.get_default_provider()
     default_name = providers[default].name if default in providers and default in enabled else "تلقائي"
     return (
-        "⚙️ **إدارة خدمات Debrid**\\n\\n"
-        f"🟢 الخدمات المفعّلة: {len(enabled)} من {len(providers)}\\n"
-        f"⭐ الخدمة الافتراضية: {default_name}\\n"
+        "⚙️ **إدارة خدمات Debrid**\n\n"
+        f"🟢 الخدمات المفعّلة: {len(enabled)} من {len(providers)}\n"
+        f"⭐ الخدمة الافتراضية: {default_name}\n"
         f"🔁 التحويل التلقائي عند الفشل: "
-        f"{'مفعّل' if user_store.get_failover_enabled(cfg.failover) else 'معطّل'}\\n\\n"
-        "اختر الخدمة لتفعيلها أو تعطيلها. ويمكنك اختبار اتصال API أو تحديد الخدمة الافتراضية.\\n"
+        f"{'مفعّل' if user_store.get_failover_enabled(cfg.failover) else 'معطّل'}\n\n"
+        "اختر الخدمة لتفعيلها أو تعطيلها. ويمكنك اختبار اتصال API أو تحديد الخدمة الافتراضية.\n"
         "مفاتيح API لا تُعرض ولا تُحفظ في قاعدة البيانات؛ تُقرأ من متغيرات بيئة الخادم."
     )
 
@@ -2171,7 +2171,7 @@ async def on_callback(client: Client, query: CallbackQuery):
                 log.warning("Service test failed for %s: %s", slug, type(exc).__name__)
                 result_text = f"❌ تعذّر التحقق من {provider.name}. نوع الخطأ: {type(exc).__name__}."
             await safe_edit(
-                query.message, result_text + "\\n\\n" + admin_services_text(),
+                query.message, result_text + "\n\n" + admin_services_text(),
                 reply_markup=admin_services_keyboard(),
             )
             return
