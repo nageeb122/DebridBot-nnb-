@@ -3,6 +3,7 @@ import logging
 import mimetypes
 import os
 import re
+import shlex
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from pyrogram.types import (
 )
 
 from config import load_config
+import user_store
 from ui_ar import about_text, help_text as arabic_help_text, main_menu, menu_back, welcome_text
 from controlc import get_paste_links
 from debrid import (
@@ -174,7 +176,7 @@ class DirectDownloadError(Exception):
 
 def _auth(_, __, update) -> bool:
     user = update.from_user
-    return bool(user) and (user.id in cfg.admin_users or not cfg.allowed_users or user.id in cfg.allowed_users)
+    return bool(user) and user_store.is_authorized(user.id, cfg.admin_users, cfg.allowed_users)
 
 
 auth = filters.create(_auth)
@@ -844,6 +846,135 @@ async def cmd_id(_, message: Message):
     if not message.from_user:
         return
     await message.reply_text(f"🆔 معرف حسابك: `{message.from_user.id}`")
+
+
+@app.on_message(filters.command("users") & filters.private)
+async def cmd_users(_, message: Message):
+    user = message.from_user
+    if not user or user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص للمشرفين.")
+        return
+
+    records = user_store.list_users(30)
+    counts = user_store.get_user_counts()
+    default_mode = "restricted" if cfg.allowed_users else "open"
+    mode = user_store.get_access_mode(default_mode)
+    lines = [
+        "👥 **إدارة المستخدمين**",
+        f"الإجمالي المسجل: {counts['total']} | المصرح: {counts['approved']} | المحظور: {counts['blocked']}",
+        f"وضع الوصول: {'مقيّد' if mode == 'restricted' else 'مفتوح'}",
+        "",
+    ]
+    if not records:
+        lines.append("لا يوجد مستخدمون مسجلون بعد.")
+    for item in records:
+        name = item["first_name"] or "بدون اسم"
+        if item["username"]:
+            name += f" (@{item['username']})"
+        status = item["status"] or "افتراضي"
+        lines.append(
+            f"• {name} — `{item['user_id']}`\n"
+            f"  الحالة: {status} | الرسائل: {item['message_count']} | آخر ظهور: {item['last_seen']}"
+        )
+    lines.append("\nالأوامر: /user_add ID ، /user_remove ID ، /user_block ID ، /user_unblock ID ، /access_mode open|restricted")
+    await message.reply_text("\n".join(lines))
+
+
+@app.on_message(filters.command("user_add") & filters.private)
+async def cmd_user_add(_, message: Message):
+    if not message.from_user or message.from_user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص للمشرفين.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip().isdigit():
+        await message.reply_text("الاستخدام: /user_add 123456789")
+        return
+    target = int(parts[1].strip())
+    if target in cfg.admin_users:
+        await message.reply_text("هذا المستخدم مشرف بالفعل.")
+        return
+    user_store.set_user_status(target, "approved")
+    await message.reply_text(f"✅ تمت إضافة المستخدم `{target}` إلى قائمة السماح.")
+
+
+@app.on_message(filters.command("user_remove") & filters.private)
+async def cmd_user_remove(_, message: Message):
+    if not message.from_user or message.from_user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص للمشرفين.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip().isdigit():
+        await message.reply_text("الاستخدام: /user_remove 123456789")
+        return
+    target = int(parts[1].strip())
+    if target in cfg.admin_users:
+        await message.reply_text("لا يمكن سحب صلاحية مشرف من هذه الواجهة.")
+        return
+    user_store.set_user_status(target, "blocked")
+    await message.reply_text(f"🚫 تم سحب صلاحية المستخدم وحظره: `{target}`")
+
+
+@app.on_message(filters.command("user_block") & filters.private)
+async def cmd_user_block(_, message: Message):
+    if not message.from_user or message.from_user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص للمشرفين.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip().isdigit():
+        await message.reply_text("الاستخدام: /user_block 123456789")
+        return
+    target = int(parts[1].strip())
+    if target in cfg.admin_users:
+        await message.reply_text("لا يمكن حظر مشرف من هذه الواجهة.")
+        return
+    user_store.set_user_status(target, "blocked")
+    await message.reply_text(f"🚫 تم حظر المستخدم `{target}`.")
+
+
+@app.on_message(filters.command("user_unblock") & filters.private)
+async def cmd_user_unblock(_, message: Message):
+    if not message.from_user or message.from_user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص للمشرفين.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip().isdigit():
+        await message.reply_text("الاستخدام: /user_unblock 123456789")
+        return
+    target = int(parts[1].strip())
+    user_store.clear_user_status(target)
+    await message.reply_text(
+        f"♻️ أزيل الحظر عن `{target}`. "
+        "إذا كان وضع الوصول مقيّداً، يجب أن يكون ضمن قائمة السماح أو تضيفه بالأمر /user_add."
+    )
+
+
+@app.on_message(filters.command("access_mode") & filters.private)
+async def cmd_access_mode(_, message: Message):
+    if not message.from_user or message.from_user.id not in cfg.admin_users:
+        await message.reply_text("⛔ هذا الأمر مخصص للمشرفين.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or parts[1].strip().lower() not in {"open", "restricted"}:
+        await message.reply_text(
+            "الاستخدام: /access_mode open أو /access_mode restricted\n"
+            "open = السماح للجميع ما عدا المحظورين.\n"
+            "restricted = السماح للمشرفين والمستخدمين المعتمدين فقط."
+        )
+        return
+    mode = parts[1].strip().lower()
+    user_store.set_access_mode(mode)
+    await message.reply_text(
+        "✅ تم تفعيل وضع الوصول: " +
+        ("مقيّد؛ لن يتمكن من الاستخدام إلا المشرفون والمصرح لهم." if mode == "restricted"
+         else "مفتوح؛ يمكن للجميع الاستخدام باستثناء المحظورين.")
+    )
+
+
+@app.on_message(filters.private, group=1)
+async def track_private_users(_, message: Message):
+    user = message.from_user
+    if user:
+        user_store.record_activity(user.id, user.username, user.first_name)
 
 
 @app.on_message(filters.command("admin") & filters.private)
@@ -1803,7 +1934,7 @@ async def send_torrent_file_card(
 
 @app.on_callback_query()
 async def on_callback(client: Client, query: CallbackQuery):
-    if query.from_user.id not in cfg.admin_users and cfg.allowed_users and query.from_user.id not in cfg.allowed_users:
+    if not user_store.is_authorized(query.from_user.id, cfg.admin_users, cfg.allowed_users):
         await query.answer("No autorizado.", show_alert=True)
         return
 
@@ -2628,6 +2759,7 @@ def _masked_proxy(url: str) -> str:
 
 
 async def main():
+    user_store.init_db()
     global http, debrid_http, providers
     timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=300)
     http = aiohttp.ClientSession(timeout=timeout)
@@ -2705,6 +2837,12 @@ async def main():
             BotCommand("help", "المساعدة وطريقة الاستخدام"),
             BotCommand("id", "عرض معرف حسابك في تيليجرام"),
             BotCommand("admin", "لوحة المشرف (للمصرح لهم فقط)"),
+            BotCommand("users", "عرض المستخدمين وإدارتهم"),
+            BotCommand("user_add", "إضافة مستخدم إلى قائمة السماح"),
+            BotCommand("user_remove", "سحب صلاحية مستخدم وحظره"),
+            BotCommand("user_block", "حظر مستخدم"),
+            BotCommand("user_unblock", "إزالة الحظر عن مستخدم"),
+            BotCommand("access_mode", "تغيير وضع الوصول للبوت"),
         ]
     )
     me = await app.get_me()
