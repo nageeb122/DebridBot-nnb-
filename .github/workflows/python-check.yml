@@ -6,6 +6,7 @@ on:
       - main
       - feature/arabic-telegram-menu
       - feature/admin-dashboard-access
+      - feature/sqlite-user-management
   pull_request:
     branches:
       - main
