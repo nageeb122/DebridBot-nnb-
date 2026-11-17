@@ -2062,7 +2062,7 @@ async def on_callback(client: Client, query: CallbackQuery):
                 for item in report["active_users"]
             ) or "لا توجد بيانات بعد."
             recent_text = "\n".join(
-                f"• {item['created_at']} · {item['event_type']} · {item['filename'] or '—'}"
+                f"• {item['created_at']} · {item['event_type']} · {(item['filename'] or '—')[:55]}"
                 for item in report["recent"]
             ) or "لا توجد عمليات مسجلة بعد."
             await query.answer()
