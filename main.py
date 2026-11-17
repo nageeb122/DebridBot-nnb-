@@ -502,7 +502,7 @@ def prefers_ytdlp_first(url: str) -> bool:
     return ytdlp_mod.supports_url(url)
 
 
-async def resolve_link(
+async def _resolve_link_impl(
     user_id: int,
     url: str,
     *,
@@ -582,6 +582,30 @@ async def resolve_link(
         pass
 
     raise DebridError("\n\n".join(errors) if errors else "No se pudo resolver el enlace")
+
+
+
+async def resolve_link(
+    user_id: int,
+    url: str,
+    *,
+    allow_ytdlp: bool = True,
+    auto_pick_stream: bool | None = None,
+) -> tuple[UnrestrictedLink, str]:
+    try:
+        link, provider_name = await _resolve_link_impl(
+            user_id, url, allow_ytdlp=allow_ytdlp,
+            auto_pick_stream=auto_pick_stream,
+        )
+    except Exception:
+        user_store.record_event(user_id, "resolve_failed", success=False)
+        raise
+    user_store.record_event(
+        user_id, "resolve_success", provider=provider_name,
+        filename=link.filename, size_bytes=link.size,
+    )
+    return link, provider_name
+
 
 
 def providers_for_url(user_id: int, url: str) -> list[DebridProvider]:
@@ -850,6 +874,7 @@ async def cmd_id(_, message: Message):
 def admin_dashboard_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm:users:0")],
+        [InlineKeyboardButton("📊 الإحصائيات وسجل العمليات", callback_data="adm:analytics")],
         [
             InlineKeyboardButton("🔒 وضع مقيّد", callback_data="adm:mode:restricted"),
             InlineKeyboardButton("🌐 وضع مفتوح", callback_data="adm:mode:open"),
@@ -2022,6 +2047,39 @@ async def on_callback(client: Client, query: CallbackQuery):
             await query.answer("هذه اللوحة مخصصة للمشرفين فقط.", show_alert=True)
             return
         section, _, argument = value.partition(":")
+        if section == "analytics":
+            report = user_store.get_analytics(30)
+            totals = report["totals"]
+            providers_text = "\\n".join(
+                f"• {item['provider']}: {item['uses']}" for item in report["providers"]
+            ) or "لا توجد بيانات بعد."
+            users_text = "\\n".join(
+                f"• {item['first_name'] or item['username'] or item['user_id']}: {item['operations']}"
+                for item in report["active_users"]
+            ) or "لا توجد بيانات بعد."
+            recent_text = "\\n".join(
+                f"• {item['created_at']} · {item['event_type']} · {item['filename'] or '—'}"
+                for item in report["recent"]
+            ) or "لا توجد عمليات مسجلة بعد."
+            await query.answer()
+            await safe_edit(
+                query.message,
+                "📊 **إحصائيات آخر 30 يوماً**\\n\\n"
+                f"🔗 فك روابط ناجح: {totals['resolved'] or 0}\\n"
+                f"❌ محاولات فاشلة: {totals['failed'] or 0}\\n"
+                f"📥 تنزيلات مكتملة إلى تيليجرام: {totals['downloads'] or 0}\\n"
+                f"❌ تنزيلات فاشلة: {totals['download_failures'] or 0}\\n"
+                f"💧 رفع مكتمل إلى DripFiles: {totals['drip_uploads'] or 0}\\n"
+                f"👥 مستخدمون نشطون: {totals['active_users'] or 0}\\n"
+                f"📦 حجم النقل المكتمل: {human_size(totals['bytes_transferred'] or 0)}\\n\\n"
+                f"⚙️ **الخدمات الأكثر استخداماً**\\n{providers_text}\\n\\n"
+                f"🏅 **الأكثر نشاطاً**\\n{users_text}\\n\\n"
+                f"🕘 **آخر العمليات**\\n{recent_text}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ لوحة المشرف", callback_data="adm:home")
+                ]]),
+            )
+            return
         if section == "home":
             counts = user_store.get_user_counts()
             mode = user_store.get_access_mode("restricted" if cfg.allowed_users else "open")
@@ -2325,6 +2383,8 @@ async def on_callback(client: Client, query: CallbackQuery):
                     link,
                     session=session_for(provider_name),
                     via_ytdlp=is_ytdlp,
+                    user_id=query.from_user.id,
+                    provider_name=provider_name,
                 )
             )
             return
@@ -2361,6 +2421,8 @@ async def on_callback(client: Client, query: CallbackQuery):
                 link,
                 session=session_for(provider_name),
                 via_ytdlp=is_ytdlp,
+                user_id=query.from_user.id,
+                provider_name=provider_name,
             )
         )
 
@@ -2594,14 +2656,22 @@ async def transfer(
     via_ytdlp: bool = False,
     raw: bool = False,
     autoname: bool = False,
+    user_id: int | None = None,
+    provider_name: str | None = None,
 ):
     progress = await message.reply_text("⬇️ Descargando...")
     path = None
+    completed = False
     try:
         path, link = await materialize_download(
             link, progress, session=session, via_ytdlp=via_ytdlp, raw=raw, autoname=autoname
         )
         await upload_to_telegram(client, message.chat.id, path, link, progress)
+        completed = True
+        user_store.record_event(
+            user_id, "download_success", provider=provider_name,
+            filename=link.filename, size_bytes=os.path.getsize(path),
+        )
         await progress.delete()
     except FileTooLarge as exc:
         extra = ""
@@ -2624,6 +2694,11 @@ async def transfer(
         log.exception("Error transfiriendo %s", link.filename)
         await safe_edit(progress, f"❌ Error en la transferencia: {exc}")
     finally:
+        if not completed:
+            user_store.record_event(
+                user_id, "download_failed", provider=provider_name,
+                filename=link.filename, success=False,
+            )
         if path and os.path.exists(path):
             os.remove(path)
 
@@ -2683,10 +2758,14 @@ async def transfer_to_dripfiles(
     link: UnrestrictedLink,
     session: aiohttp.ClientSession | None = None,
     via_ytdlp: bool = False,
+    user_id: int | None = None,
+    provider_name: str | None = None,
 ):
     """Descarga el archivo y lo sube a DripFiles; devuelve el enlace público."""
     progress = await message.reply_text("⬇️ Descargando para DripFiles...")
     path = None
+    completed = False
+    size = 0
     try:
         path, link = await materialize_download(
             link, progress, session=session, via_ytdlp=via_ytdlp
@@ -2729,6 +2808,11 @@ async def transfer_to_dripfiles(
             on_progress=on_progress,
         )
         url = result.get("url") or ""
+        completed = True
+        user_store.record_event(
+            user_id, "drip_upload_success", provider=provider_name or "DripFiles",
+            filename=link.filename, size_bytes=size,
+        )
         expires = result.get("expires_at")
         expire_note = ""
         if isinstance(expires, (int, float)) and expires > 0:
@@ -2756,6 +2840,11 @@ async def transfer_to_dripfiles(
         log.exception("Error subiendo a DripFiles %s", link.filename)
         await safe_edit(progress, f"❌ Error subiendo a DripFiles: {exc}")
     finally:
+        if not completed:
+            user_store.record_event(
+                user_id, "drip_upload_failed", provider=provider_name or "DripFiles",
+                filename=link.filename, size_bytes=size, success=False,
+            )
         if path and os.path.exists(path):
             os.remove(path)
 
