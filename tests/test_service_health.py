@@ -23,7 +23,7 @@ class ServiceHealthTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
         provider = type("Provider", (), {
             "slug": "slow",
-            "list_torrents": slow,
+            "list_torrents": AsyncMock(side_effect=slow),
         })()
         result = await service_health.check_provider(provider, timeout=0.001)
         self.assertEqual(result.status, "timeout")
@@ -33,7 +33,7 @@ class ServiceHealthTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("private response or token-like data")
         provider = type("Provider", (), {
             "slug": "broken",
-            "list_torrents": fail,
+            "list_torrents": AsyncMock(side_effect=RuntimeError("private response or token-like data")),
         })()
         result = await service_health.check_provider(provider)
         self.assertEqual(result.status, "error")
