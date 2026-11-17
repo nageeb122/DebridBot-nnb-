@@ -32,6 +32,6 @@ COPY . .
 # puerto del relay de enlaces (LINK_PROXY)
 EXPOSE 8845
 
-VOLUME ["/app/downloads"]
+VOLUME ["/app/downloads", "/app/data"]
 
 CMD ["python", "main.py"]
