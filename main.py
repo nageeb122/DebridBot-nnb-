@@ -860,15 +860,15 @@ async def cmd_admin(_, message: Message):
     pending_count = len(pending) + len(pending_ytdlp) + len(pending_ad_streams) + len(pending_pickers)
     allowed_text = "مفتوح للجميع" if not cfg.allowed_users else str(len(cfg.allowed_users))
     await message.reply_text(
-        "🛡️ لوحة المشرف\\n\\n"
-        f"👤 المشرفون: {len(cfg.admin_users)}\\n"
-        f"🔐 المستخدمون المسموحون: {allowed_text}\\n"
-        f"⚙️ خدمات Debrid المهيأة: {len(providers)}\\n"
-        f"👥 مستخدمون اختاروا خدمة: {len(user_service)}\\n"
-        f"📦 عمليات معلّقة: {pending_count}\\n"
-        f"🔄 مهام خلفية نشطة: {len(background_tasks)}\\n"
-        f"⏱️ مدة التشغيل: {hours:02d}:{minutes:02d}:{seconds:02d}\\n\\n"
-        "لإضافة مشرف أو تغيير قائمة السماح، عدّل ADMIN_USER_IDS أو ALLOWED_USER_IDS في ملف البيئة ثم أعد تشغيل البوت.\\n"
+        "🛡️ لوحة المشرف\n\n"
+        f"👤 المشرفون: {len(cfg.admin_users)}\n"
+        f"🔐 المستخدمون المسموحون: {allowed_text}\n"
+        f"⚙️ خدمات Debrid المهيأة: {len(providers)}\n"
+        f"👥 مستخدمون اختاروا خدمة: {len(user_service)}\n"
+        f"📦 عمليات معلّقة: {pending_count}\n"
+        f"🔄 مهام خلفية نشطة: {len(background_tasks)}\n"
+        f"⏱️ مدة التشغيل: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n"
+        "لإضافة مشرف أو تغيير قائمة السماح، عدّل ADMIN_USER_IDS أو ALLOWED_USER_IDS في ملف البيئة ثم أعد تشغيل البوت.\n"
         "لا تضع مفاتيح API أو رمز البوت داخل ملفات GitHub."
     )
 
