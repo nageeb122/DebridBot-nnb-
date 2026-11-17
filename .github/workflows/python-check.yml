@@ -9,6 +9,7 @@ on:
       - feature/sqlite-user-management
       - feature/interactive-admin-panel
       - feature/usage-analytics
+      - feature/debrid-service-manager
   pull_request:
     branches:
       - main
