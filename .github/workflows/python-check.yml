@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile Python files
-        run: python -m compileall -q .
+        run: |\n          python -m compileall -q .\n          python -m unittest discover -s tests -v
