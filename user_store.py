@@ -236,8 +236,11 @@ def get_analytics(days: int = 30) -> dict[str, Any]:
         recent = conn.execute(
             """
             SELECT event_type, provider, filename, size_bytes, success, created_at
-            FROM usage_events ORDER BY id DESC LIMIT 10
-            """
+            FROM usage_events
+            WHERE created_at >= datetime('now', ?)
+            ORDER BY id DESC LIMIT 10
+            """,
+            (f"-{days} days",),
         ).fetchall()
         return {
             "totals": dict(totals),
