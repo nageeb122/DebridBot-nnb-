@@ -23,6 +23,7 @@ class Config:
     highway_login: str | None
     highway_password: str | None
     allowed_users: frozenset[int]
+    admin_users: frozenset[int]
     download_dir: str
     debrid_proxy: str | None
     link_proxy: bool
@@ -55,6 +56,8 @@ def load_config() -> Config:
 
     raw_users = _env("ALLOWED_USER_IDS") or ""
     allowed = frozenset(int(uid) for uid in raw_users.replace(" ", "").split(",") if uid)
+    raw_admins = _env("ADMIN_USER_IDS") or ""
+    admins = frozenset(int(uid) for uid in raw_admins.replace(" ", "").split(",") if uid)
 
     # HOST_RULES=rapidgator:torbox, 1fichier.com:alldebrid
     rules = []
@@ -89,6 +92,7 @@ def load_config() -> Config:
         highway_login=_env("HIGHWAY_LOGIN"),
         highway_password=_env("HIGHWAY_PASSWORD"),
         allowed_users=allowed,
+        admin_users=admins,
         download_dir=_env("DOWNLOAD_DIR") or "downloads",
         debrid_proxy=proxy,
         link_proxy=(_env("LINK_PROXY") or "").lower() in ("1", "true", "yes", "si", "sí"),
